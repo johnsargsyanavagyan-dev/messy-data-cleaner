@@ -1,0 +1,59 @@
+# Messy Data Cleaner - rule file
+# Only what is written here is fixed automatically. Everything else goes to review.
+# Changing this file requires human approval and an entry in rules_changelog.md.
+version: 2
+
+# Fields that must not be blank (blank -> REQUIRED_BLANK, review)
+required_fields: [full_name, email, city, birth_date]
+
+# TRIM: remove spaces at start/end and collapse double spaces, in every column
+trim_spaces: true
+
+# NAME_CASE: a name written ALL lower or ALL UPPER becomes Title Case.
+# Mixed case (e.g. "McArthur") is never touched.
+name_column: full_name
+
+# EMAIL_LOWER: emails are lowercased. Then checked against the pattern.
+# Not matching -> EMAIL_INVALID (review). Emails are never "repaired".
+email:
+  column: email
+  pattern: '^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$'
+
+# CITY_MAP: approved names, and known variants mapped to them.
+# A spelling that is in neither list -> CITY_UNKNOWN (review). Never guessed.
+city:
+  column: city
+  approved: [Yerevan, Gyumri, Vanadzor, Abovyan, Hrazdan, Ijevan, Dilijan, Kapan, Goris, Sevan]
+  variants:
+    erevan: Yerevan
+    yerevan city: Yerevan
+    yervan: Yerevan
+    gumri: Gyumri
+    leninakan: Gyumri
+    vanadsor: Vanadzor
+    kirovakan: Vanadzor
+
+# DATE_FORMAT: dates are converted to YYYY-MM-DD if written in an accepted format.
+# DD.MM.YYYY (dots) is always day-first.
+# Slash dates (03/04/2000): fixed only if unambiguous (one part > 12 or both equal);
+# otherwise DATE_AMBIGUOUS (review). Unknown format or impossible/future date -> review.
+dates:
+  columns: [birth_date]
+  output_format: '%Y-%m-%d'
+  accepted_formats: ['%Y-%m-%d', '%d.%m.%Y', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%B %d, %Y', '%b %d, %Y']
+
+# Numbers outside these ranges -> OUT_OF_RANGE (review). Not a number -> NOT_A_NUMBER (review).
+ranges:
+  age: {min: 0, max: 120}
+
+# VALUE_CASE: values matching an allowed value except for case are corrected.
+# Anything else -> VALUE_NOT_ALLOWED (review).
+allowed_values:
+  membership: [Basic, Student, Gold]
+
+# DUP_EXACT: rows identical in every field (after the fixes above) -> later copy removed.
+# Same name with different details, or same email with different name -> review, both rows.
+duplicates:
+  exact: remove
+  same_name_different_details: review
+  same_email_different_name: review
