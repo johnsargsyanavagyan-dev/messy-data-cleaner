@@ -1,0 +1,128 @@
+name: Automatic CSV Cleaner
+
+on:
+  push:
+    paths:
+      - "inbox/**/*.csv"
+
+permissions:
+  contents: read
+
+jobs:
+  clean-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download repository files
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install required library
+        run: python -m pip install PyYAML
+
+      - name: Clean CSV files and verify results
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv
+          import subprocess
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          results = Path("results")
+          results.mkdir(exist_ok=True)
+          records = []
+          failed = False
+
+          for source in sorted(Path("inbox").rglob("*.csv")):
+              relative = source.relative_to("inbox")
+              destination = results / relative.with_suffix("")
+              destination.mkdir(parents=True, exist_ok=True)
+
+              with source.open(newline="", encoding="utf-8-sig") as f:
+                  rows_in = sum(1 for _ in csv.DictReader(f))
+
+              command = [
+                  sys.executable, "clean.py", str(source),
+                  "--rules", "rules.yaml",
+                  "--out", str(destination)
+              ]
+              run = subprocess.run(command, text=True,
+                                   capture_output=True)
+
+              (destination / "run_log.txt").write_text(
+                  run.stdout + run.stderr, encoding="utf-8"
+              )
+              print(f"Processing {source}")
+              print(run.stdout)
+              if run.stderr:
+                  print(run.stderr)
+
+              passed = (
+                  run.returncode == 0
+                  and "SELF-CHECK PASSED" in run.stdout
+              )
+
+              def read_csv(filename):
+                  path = destination / filename
+                  if not path.exists():
+                      return []
+                  with path.open(newline="", encoding="utf-8") as f:
+                      return list(csv.DictReader(f))
+
+              clean = read_csv("clean.csv")
+              review = read_csv("needs_review.csv")
+              changes = read_csv("change_log.csv")
+
+              review_count = len({r["row_id"] for r in review})
+              duplicates = sum(
+                  r["rule_id"] == "DUP_EXACT" for r in changes
+              )
+
+              passed = passed and (
+                  rows_in == len(clean) + review_count + duplicates
+              )
+
+              records.append({
+                  "time_utc": datetime.now(timezone.utc).isoformat(),
+                  "file": str(relative),
+                  "rows_in": rows_in,
+                  "clean": len(clean),
+                  "review": review_count,
+                  "removed": duplicates,
+                  "self_check": "PASS" if passed else "FAIL"
+              })
+
+              if not passed:
+                  failed = True
+
+          with (results / "check_log.csv").open(
+              "w", newline="", encoding="utf-8"
+          ) as f:
+              writer = csv.DictWriter(
+                  f, fieldnames=[
+                      "time_utc", "file", "rows_in",
+                      "clean", "review", "removed", "self_check"
+                  ]
+              )
+              writer.writeheader()
+              writer.writerows(records)
+
+          if not records:
+              sys.exit("No CSV files found in inbox")
+          if failed:
+              sys.exit("One or more cleaning checks failed")
+          PY
+
+      - name: Save cleaning results and check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: csv-cleaning-results
+          path: results/
+          if-no-files-found: warn
